@@ -205,18 +205,36 @@ def markdown_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("`", "\\`").replace("<", "\\<")
 
 
+def clean_transcript_text(transcript: str) -> str:
+    lines = []
+    skip_keywords = False
+    for raw in transcript.splitlines():
+        line = raw.strip()
+        if not line:
+            if lines and lines[-1] != "":
+                lines.append("")
+            continue
+        if re.match(r"^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s+\w+\|", line):
+            continue
+        if line == "Keywords:":
+            skip_keywords = True
+            continue
+        if skip_keywords:
+            skip_keywords = False
+            continue
+        if re.match(r"^Speaker\s+\S+\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?\s*$", line):
+            continue
+        if re.match(r"^\d{2}:\d{2}:\d{2}(?:\.\d+)?\s*$", line):
+            continue
+        lines.append(line)
+    text = "\n\n".join(part for part in "\n".join(lines).split("\n\n") if part.strip())
+    return text.strip()
+
+
+
 def create_transcript_doc(original_name: str, transcript: str, message_id: str, minute_url: str = "") -> str:
-    title = f"转录结果 - {original_name}"
-    created = time.strftime("%Y-%m-%d %H:%M:%S")
-    minute_block = f"**飞书妙记**：{minute_url}\n\n" if minute_url else ""
-    content = (
-        f"**来源文件**：{markdown_escape(original_name)}\n\n"
-        f"**飞书消息 ID**：`{message_id}`\n\n"
-        f"**生成时间**：{created}\n\n"
-        f"{minute_block}"
-        "## 逐字稿\n\n"
-        f"{markdown_escape(transcript)}\n"
-    )
+    title = f"逐字稿 - {original_name}"
+    content = clean_transcript_text(transcript) + "\n"
     data = run_lark([
         "docs", "+create", "--as", "user", "--doc-format", "markdown",
         "--title", title, "--content", "-", "--format", "json",
@@ -297,17 +315,7 @@ def fetch_minute_artifacts(minute_token: str) -> tuple[str, str, str, Path | Non
 
 
 def build_transcript_markdown(title: str, source_id: str, minute_url: str, summary: str, transcript: str) -> str:
-    created = time.strftime("%Y-%m-%d %H:%M:%S")
-    summary_block = f"## 摘要\n\n{summary}\n\n" if summary else ""
-    return (
-        f"# 转录结果 - {markdown_escape(title)}\n\n"
-        f"**来源**：{minute_url}\n\n"
-        f"**来源 ID**：`{source_id}`\n\n"
-        f"**生成时间**：{created}\n\n"
-        f"{summary_block}"
-        "## 逐字稿\n\n"
-        f"{transcript}\n"
-    )
+    return clean_transcript_text(transcript) + "\n"
 
 
 def upload_markdown_file(title: str, content: str, source_id: str) -> str:
