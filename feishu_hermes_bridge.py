@@ -27,6 +27,7 @@ YTDLP_PROXY = os.environ.get("YTDLP_PROXY", "http://127.0.0.1:7897")
 
 MEDIA_EXTS = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".wma", ".amr", ".avi", ".wmv", ".mov", ".mp4", ".m4v", ".mpeg", ".flv"}
 YOUTUBE_RE = re.compile(r"https?://(?:www\.)?(?:youtube\.com/watch\?[^\s]+|youtu\.be/[^\s]+)", re.I)
+MINUTE_URL_RE = re.compile(r"https?://[^\s]+/minutes/(obcn[a-zA-Z0-9]+)", re.I)
 FILE_RE = re.compile(r'<file\s+key="([^"]+)"\s+name="([^"]+)"\s*/?>')
 
 
@@ -272,6 +273,88 @@ def fetch_minute_transcript(minute_token: str) -> tuple[str, Path | None]:
     return transcript, transcript_path
 
 
+
+def fetch_minute_artifacts(minute_token: str) -> tuple[str, str, str, Path | None]:
+    out_dir = "bridge-minutes"
+    data = run_lark([
+        "minutes", "+detail", "--as", "user", "--minute-tokens", minute_token,
+        "--wait-ready", "--summary", "--transcript", "--output-dir", out_dir,
+        "--overwrite", "--format", "json",
+    ], timeout=600)
+    minutes = ((data.get("data") or {}).get("minutes") or [])
+    minute = minutes[0] if minutes else {}
+    title = minute.get("title") or minute_token
+    artifacts = minute.get("artifacts") or {}
+    summary = artifacts.get("summary") or ""
+    transcript_file = artifacts.get("transcript_file") or ""
+    if not transcript_file:
+        raise RuntimeError(f"妙记已创建但未返回逐字稿文件: {json.dumps(data, ensure_ascii=False)[:500]}")
+    transcript_path = ROOT / transcript_file
+    transcript = transcript_path.read_text(encoding="utf-8").strip()
+    if not transcript:
+        raise RuntimeError("妙记逐字稿为空")
+    return title, summary, transcript, transcript_path
+
+
+def build_transcript_markdown(title: str, source_id: str, minute_url: str, summary: str, transcript: str) -> str:
+    created = time.strftime("%Y-%m-%d %H:%M:%S")
+    summary_block = f"## 摘要\n\n{summary}\n\n" if summary else ""
+    return (
+        f"# 转录结果 - {markdown_escape(title)}\n\n"
+        f"**来源**：{minute_url}\n\n"
+        f"**来源 ID**：`{source_id}`\n\n"
+        f"**生成时间**：{created}\n\n"
+        f"{summary_block}"
+        "## 逐字稿\n\n"
+        f"{transcript}\n"
+    )
+
+
+def upload_markdown_file(title: str, content: str, source_id: str) -> str:
+    TEMP_DIR.mkdir(exist_ok=True)
+    digest = hashlib.sha1(source_id.encode("utf-8")).hexdigest()[:12]
+    filename = safe_filename(f"转录结果 - {title}-{digest}.md", f"transcript-{digest}.md")
+    path = TEMP_DIR / filename
+    path.write_text(content, encoding="utf-8")
+    try:
+        rel = path.relative_to(ROOT).as_posix()
+        data = run_lark([
+            "drive", "+upload", "--as", "user", "--file", rel,
+            "--name", filename, "--format", "json",
+        ], timeout=180)
+        info = data.get("data") or {}
+        url = info.get("url") or ""
+        if not url:
+            raise RuntimeError(f"Markdown 上传成功但未返回 URL: {json.dumps(data, ensure_ascii=False)[:500]}")
+        return url
+    finally:
+        try:
+            if path.exists():
+                path.unlink()
+        except Exception as exc:
+            log(f"failed to delete temp markdown file={path}: {exc}")
+
+
+def handle_minute_link_message(content: str, message_id: str, chat_id: str, event_id: str) -> bool:
+    match = MINUTE_URL_RE.search(content)
+    if not match:
+        return False
+    minute_token = match.group(1)
+    minute_url = match.group(0)
+    transcript_path: Path | None = None
+    send_chat(chat_id, f"已收到飞书妙记链接，开始读取逐字稿并生成 Markdown 文件：\n{minute_url}", event_id, "-min-start")
+    try:
+        title, summary, transcript, transcript_path = fetch_minute_artifacts(minute_token)
+        markdown = build_transcript_markdown(title, message_id, minute_url, summary, transcript)
+        md_url = upload_markdown_file(title, markdown, message_id)
+        doc_url = create_transcript_doc(title, transcript, message_id, minute_url)
+        send_chat(chat_id, f"已生成转录结果。\nMarkdown 文件：{md_url}\n飞书文档：{doc_url}", event_id, "-min-done")
+        log(f"minute link exported message={message_id} minute_token={minute_token}")
+    finally:
+        cleanup_generated_transcript(transcript_path)
+    return True
+
+
 def cleanup_generated_transcript(path: Path | None) -> None:
     if not path:
         return
@@ -425,6 +508,9 @@ def main() -> int:
 
             if message_type != "text" or not content:
                 reply(message_id, "我目前可以处理文本消息和音视频文件。这个消息类型暂不支持。", event_id)
+                continue
+
+            if handle_minute_link_message(content, message_id, chat_id, event_id):
                 continue
 
             if handle_youtube_message(content, message_id, chat_id, event_id):

@@ -4,7 +4,7 @@
 
 - 普通文本消息转发给 Hermes Agent 回复
 - 飞书私聊/群聊中的音视频附件转飞书妙记
-- 读取妙记逐字稿并创建飞书文档
+- 读取妙记逐字稿并创建飞书文档\n- 飞书妙记链接导出为 Markdown 文件并上传到飞书云空间
 - YouTube 链接通过 `yt-dlp` 临时下载音频后转飞书妙记
 
 ## 主要文件
@@ -54,3 +54,4 @@ http://127.0.0.1:7897
 powershell -ExecutionPolicy Bypass -File .\start_feishu_hermes_bridge.ps1
 powershell -ExecutionPolicy Bypass -File .\stop_feishu_hermes_bridge.ps1
 ```
+
