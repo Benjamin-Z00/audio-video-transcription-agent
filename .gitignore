@@ -1,0 +1,35 @@
+﻿# Local secrets and bindings
+.hermes-bind/
+*.env
+.env*
+
+# Runtime logs and pid files
+*.log
+*.pid
+*.out.log
+*.err.log
+
+# Temporary media and generated transcripts
+bridge-temp/
+bridge-minutes/
+bridge-downloads/
+minutes/
+.tmp/
+.npm-cache/
+__pycache__/
+*.pyc
+
+# Local auth QR codes
+*auth-qr*.png
+feishu-*-qr.png
+
+# Installer and local diagnostics
+nemoclaw-install.sh
+docker-check.log
+config-init-agent.*.log
+.lark-config-init.*.log
+
+# Local research / unrelated notes
+skills/
+*.xml
+吴梦知文案调研与Skill沉淀.md
