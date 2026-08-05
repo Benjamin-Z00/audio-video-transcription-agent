@@ -34,7 +34,8 @@ FILE_RE = re.compile(r'<file\s+key="([^"]+)"\s+name="([^"]+)"\s*/?>')
 def log(message: str) -> None:
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     line = f"[{ts}] {message}"
-    print(line, flush=True)
+    console_encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    print(line.encode(console_encoding, "replace").decode(console_encoding, "replace"), flush=True)
     with LOG_PATH.open("a", encoding="utf-8") as f:
         f.write(line + "\n")
 
@@ -443,6 +444,8 @@ def download_youtube_audio(url: str, event_id: str) -> tuple[Path, str]:
     )
     if result.returncode != 0:
         raw = (result.stderr or result.stdout or "").strip()
+        if "Sign in to confirm" in raw or "not a bot" in raw or "cookies-from-browser" in raw:
+            raise RuntimeError("这个 YouTube 链接触发了登录/真人验证，当前未启用浏览器 cookies，yt-dlp 无法下载。需要你单独确认后，才能启用浏览器 cookies 读取。")
         raise RuntimeError(f"yt-dlp 下载失败：{raw[:700]}")
     matches = sorted(TEMP_DIR.glob(f"yt-{digest}.*"), key=lambda x: x.stat().st_mtime, reverse=True)
     if not matches:
