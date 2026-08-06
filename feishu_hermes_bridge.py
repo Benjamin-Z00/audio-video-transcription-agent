@@ -32,6 +32,7 @@ YTDLP_MERGE_FORMAT = os.environ.get("YTDLP_MERGE_FORMAT", "mp4")
 MEDIA_EXTS = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".wma", ".amr", ".avi", ".wmv", ".mov", ".mp4", ".m4v", ".mpeg", ".flv"}
 YOUTUBE_RE = re.compile(r"https?://(?:www\.)?(?:youtube\.com/watch\?[^\s]+|youtu\.be/[^\s]+)", re.I)
 MINUTE_URL_RE = re.compile(r"https?://[^\s]+/minutes/(obcn[a-zA-Z0-9]+)", re.I)
+URL_RE = re.compile(r"https?://[^\s<>\"]+", re.I)
 FILE_RE = re.compile(r'<file\s+key="([^"]+)"\s+name="([^"]+)"\s*/?>')
 
 
