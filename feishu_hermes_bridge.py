@@ -359,6 +359,20 @@ def upload_markdown_file(title: str, content: str, source_id: str) -> str:
             log(f"failed to delete temp markdown file={path}: {exc}")
 
 
+
+def preference_reply(content: str) -> str | None:
+    compact = re.sub(r"\s+", "", content)
+    wants_clean_transcript = any(token in compact for token in ("只要文字", "只要逐字稿", "干净的逐字稿", "视频中的文案", "音频中的文字"))
+    mentions_no_summary = any(token in compact for token in ("不要摘要", "不要总结", "不需要摘要", "不需要总结"))
+    mentions_cloud_doc = any(token in compact for token in ("云文档", "飞书文档", "文档中"))
+    if wants_clean_transcript or mentions_no_summary or mentions_cloud_doc:
+        return (
+            "已按这个规则处理：后续音频/视频只输出干净的逐字稿正文，"
+            "不写摘要、总结、标题、来源、Speaker 或时间戳，并保存到飞书云文档。"
+        )
+    return None
+
+
 def handle_minute_link_message(content: str, message_id: str, chat_id: str, event_id: str) -> bool:
     match = MINUTE_URL_RE.search(content)
     if not match:
@@ -557,13 +571,21 @@ def main() -> int:
                 reply(message_id, "我目前可以处理文本消息和音视频文件。这个消息类型暂不支持。", event_id)
                 continue
 
+            pref_reply = preference_reply(content)
+            if pref_reply:
+                reply(message_id, pref_reply, event_id)
+                continue
+
             if handle_minute_link_message(content, message_id, chat_id, event_id):
                 continue
 
             if handle_youtube_message(content, message_id, chat_id, event_id):
                 continue
 
-            answer = ask_hermes(content, sender_id, chat_type)
+            try:
+                answer = ask_hermes(content, sender_id, chat_type)
+            except urllib.error.URLError as exc:
+                raise RuntimeError("文本问答接口暂时不可用，但音视频转写桥接仍可用。请直接发送音视频文件、飞书妙记链接或 YouTube 链接。") from exc
             reply(message_id, answer, event_id)
             log(f"replied event={event_id} message={message_id}")
         except Exception as exc:
