@@ -367,6 +367,23 @@ def preference_reply(content: str) -> str | None:
     wants_clean_transcript = any(token in compact for token in ("只要文字", "只要逐字稿", "干净的逐字稿", "视频中的文案", "音频中的文字"))
     mentions_no_summary = any(token in compact for token in ("不要摘要", "不要总结", "不需要摘要", "不需要总结"))
     mentions_cloud_doc = any(token in compact for token in ("云文档", "飞书文档", "文档中"))
+    asks_capability = any(token in compact for token in ("能力边界", "你能做什么", "能做什么", "不能做什么", "能力是什么", "你的能力"))
+
+    if asks_capability:
+        return (
+            "我是音视频转录 Agent。\n\n"
+            "我能做：\n"
+            "1. 接收 YouTube 视频链接，下载视频并保留到本机 bridge-downloads。\n"
+            "2. 接收普通音频/视频直链，下载并保留到本机 bridge-downloads。\n"
+            "3. 接收飞书聊天里的音频/视频附件。\n"
+            "4. 接收飞书妙记链接。\n"
+            "5. 最终只生成干净逐字稿正文，保存为 Markdown 文件并上传到飞书云空间，同时创建飞书在线文档。\n\n"
+            "我不会做：\n"
+            "1. 不输出摘要、总结、标题、来源、Speaker 或时间戳。\n"
+            "2. 不默认读取浏览器 cookies；YouTube 需要登录验证时必须先经过你确认。\n"
+            "3. 不把 API key、app secret、cookies、临时文件提交到 GitHub。"
+        )
+
     if wants_clean_transcript or mentions_no_summary or mentions_cloud_doc:
         return (
             "已按这个规则处理：后续音频/视频只输出干净的逐字稿正文，"
