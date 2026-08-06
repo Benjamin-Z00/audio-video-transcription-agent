@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -423,10 +424,12 @@ def process_local_media(local_path: Path, name: str, source_id: str, chat_id: st
         send_chat(chat_id, f"飞书妙记已创建，正在等待逐字稿生成：\n{minute_url}", event_id, "-minute")
         log(f"minute created source={source_id} minute_token={minute_token}")
 
-        transcript, transcript_path = fetch_minute_transcript(minute_token)
-        doc_url = create_transcript_doc(name, transcript, source_id, minute_url)
-        send_chat(chat_id, f"转录完成。\n妙记：{minute_url}\n逐字稿文档：{doc_url}", event_id, "-done")
-        log(f"minute transcribed source={source_id} doc_created=yes")
+        title, summary, transcript, transcript_path = fetch_minute_artifacts(minute_token)
+        markdown = build_transcript_markdown(title or name, source_id, minute_url, "", transcript)
+        md_url = upload_markdown_file(title or name, markdown, source_id)
+        doc_url = create_transcript_doc(title or name, transcript, source_id, minute_url)
+        send_chat(chat_id, f"转录完成，已生成干净逐字稿。\nMarkdown 文件：{md_url}\n飞书文档：{doc_url}", event_id, "-done")
+        log(f"minute transcribed source={source_id} md_created=yes doc_created=yes")
     finally:
         cleanup_generated_transcript(transcript_path)
 
@@ -513,6 +516,51 @@ def download_youtube_audio(url: str, event_id: str) -> tuple[Path, str]:
     raise RuntimeError("这个 YouTube 链接触发了登录/真人验证。已尝试普通下载和多个免登录客户端参数，仍无法下载；需要换代理出口，或在你明确同意后使用浏览器 cookies / cookies.txt。")
 
 
+def extract_first_url(content: str) -> str | None:
+    match = URL_RE.search(content)
+    if not match:
+        return None
+    return match.group(0).rstrip("，。；;、)）]")
+
+
+def is_direct_media_url(url: str) -> bool:
+    path = urllib.parse.urlparse(url).path
+    return Path(urllib.parse.unquote(path)).suffix.lower() in MEDIA_EXTS
+
+
+def download_direct_media_url(url: str, event_id: str) -> tuple[Path, str]:
+    DOWNLOAD_DIR.mkdir(exist_ok=True)
+    parsed = urllib.parse.urlparse(url)
+    name = Path(urllib.parse.unquote(parsed.path)).name or f"media-{event_id}.bin"
+    ext = Path(name).suffix.lower()
+    if ext not in MEDIA_EXTS:
+        raise RuntimeError("这个链接不是可识别的音视频直链")
+    digest = hashlib.sha1(f"{event_id}:{url}".encode("utf-8")).hexdigest()[:12]
+    target = DOWNLOAD_DIR / safe_filename(f"{Path(name).stem}-{digest}{ext}", f"media-{digest}{ext}")
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=600) as resp, target.open("wb") as out:
+        while True:
+            chunk = resp.read(1024 * 1024)
+            if not chunk:
+                break
+            out.write(chunk)
+    return target, target.name
+
+
+def handle_media_url_message(content: str, message_id: str, chat_id: str, event_id: str) -> bool:
+    url = extract_first_url(content)
+    if not url or MINUTE_URL_RE.search(url) or YOUTUBE_RE.search(url):
+        return False
+    if not is_direct_media_url(url):
+        return False
+    send_chat(chat_id, "已收到音视频直链，开始下载并生成飞书妙记。下载文件会保留在本机 bridge-downloads 目录。", event_id, "-url-start")
+    local_path, name = download_direct_media_url(url, event_id)
+    log(f"direct media downloaded message={message_id} file={local_path.name}")
+    process_local_media(local_path, name, message_id, chat_id, event_id)
+    send_chat(chat_id, f"本机下载文件已保留：{local_path}", event_id, "-url-saved")
+    return True
+
+
 def handle_youtube_message(content: str, message_id: str, chat_id: str, event_id: str) -> bool:
     match = YOUTUBE_RE.search(content)
     if not match:
@@ -580,6 +628,9 @@ def main() -> int:
                 continue
 
             if handle_youtube_message(content, message_id, chat_id, event_id):
+                continue
+
+            if handle_media_url_message(content, message_id, chat_id, event_id):
                 continue
 
             try:

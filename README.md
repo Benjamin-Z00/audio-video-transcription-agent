@@ -57,3 +57,15 @@ powershell -ExecutionPolicy Bypass -File .\stop_feishu_hermes_bridge.ps1
 ```
 
 
+
+## 最终输出规则
+
+无论输入是：
+
+- YouTube 视频链接
+- 普通音频/视频直链
+- 飞书聊天里的本地音频附件
+- 飞书聊天里的本地视频附件
+- 飞书妙记链接
+
+最终都只输出干净的逐字稿正文，并保存为 Markdown 文件上传到飞书云空间；同时创建一份飞书在线文档。输出中不包含摘要、总结、标题、来源、Speaker 或时间戳。
