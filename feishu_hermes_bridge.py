@@ -424,35 +424,58 @@ def handle_file_message(message_id: str, chat_id: str, event_id: str) -> None:
                 log(f"failed to delete temp media message={message_id}: {exc}")
 
 
-def download_youtube_audio(url: str, event_id: str) -> tuple[Path, str]:
-    TEMP_DIR.mkdir(exist_ok=True)
-    digest = hashlib.sha1(f"{event_id}:{url}".encode("utf-8")).hexdigest()[:12]
-    output_template = str(TEMP_DIR / f"yt-{digest}.%(ext)s")
+def run_ytdlp_download(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        cmd, cwd=str(ROOT), text=True, encoding="utf-8", errors="replace",
+        capture_output=True, timeout=1800,
+    )
+
+
+def youtube_verification_error(raw: str) -> bool:
+    return "Sign in to confirm" in raw or "not a bot" in raw or "cookies-from-browser" in raw
+
+
+def build_ytdlp_cmd(url: str, output_template: str, extra_args: list[str] | None = None) -> list[str]:
     cmd = [
         sys.executable, "-m", "yt_dlp",
         "--no-playlist",
         "--windows-filenames",
         "-f", "bestaudio/best",
         "-o", output_template,
-        url,
     ]
     if YTDLP_PROXY:
-        cmd[3:3] = ["--proxy", YTDLP_PROXY]
-    result = subprocess.run(
-        cmd, cwd=str(ROOT), text=True, encoding="utf-8", errors="replace",
-        capture_output=True, timeout=1800,
-    )
-    if result.returncode != 0:
-        raw = (result.stderr or result.stdout or "").strip()
-        if "Sign in to confirm" in raw or "not a bot" in raw or "cookies-from-browser" in raw:
-            raise RuntimeError("这个 YouTube 链接触发了登录/真人验证，当前未启用浏览器 cookies，yt-dlp 无法下载。需要你单独确认后，才能启用浏览器 cookies 读取。")
-        raise RuntimeError(f"yt-dlp 下载失败：{raw[:700]}")
+        cmd.extend(["--proxy", YTDLP_PROXY])
+    if extra_args:
+        cmd.extend(extra_args)
+    cmd.append(url)
+    return cmd
+
+
+def download_youtube_audio(url: str, event_id: str) -> tuple[Path, str]:
+    TEMP_DIR.mkdir(exist_ok=True)
+    digest = hashlib.sha1(f"{event_id}:{url}".encode("utf-8")).hexdigest()[:12]
+    output_template = str(TEMP_DIR / f"yt-{digest}.%(ext)s")
+    attempts = [
+        [],
+        ["--extractor-args", "youtube:player_client=android,ios,web"],
+        ["--extractor-args", "youtube:player_client=tv,web_embedded,web_safari,mweb"],
+    ]
+    last_raw = ""
+    for extra_args in attempts:
+        result = run_ytdlp_download(build_ytdlp_cmd(url, output_template, extra_args))
+        if result.returncode == 0:
+            break
+        last_raw = (result.stderr or result.stdout or "").strip()
+        if not youtube_verification_error(last_raw):
+            raise RuntimeError(f"yt-dlp 下载失败：{last_raw[:700]}")
+    else:
+        raise RuntimeError("这个 YouTube 链接触发了登录/真人验证。已尝试普通下载和多个免登录客户端参数，仍无法下载；需要换代理出口，或在你明确同意后使用浏览器 cookies / cookies.txt。")
+
     matches = sorted(TEMP_DIR.glob(f"yt-{digest}.*"), key=lambda x: x.stat().st_mtime, reverse=True)
     if not matches:
         raise RuntimeError("yt-dlp 下载完成但未找到输出文件")
     media_path = matches[0]
-    title = media_path.name
-    return media_path, title
+    return media_path, media_path.name
 
 
 def handle_youtube_message(content: str, message_id: str, chat_id: str, event_id: str) -> bool:
