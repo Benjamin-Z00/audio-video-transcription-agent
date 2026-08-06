@@ -14,6 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 LOG_PATH = ROOT / "feishu-hermes-bridge.log"
 TEMP_DIR = ROOT / "bridge-temp"
+DOWNLOAD_DIR = ROOT / "bridge-downloads"
 
 LARK_CLI = r"C:\Users\bozhu\.trae-cn\plugins\trae-remote-official\lark\1.0.3\bin\lark-cli.exe"
 HERMES_HOME = str(ROOT / ".hermes-bind")
@@ -24,6 +25,8 @@ STT_PROVIDER = os.environ.get("HERMES_STT_PROVIDER", "openrouter").lower()
 STT_API_URL = os.environ.get("HERMES_STT_API_URL", "https://openrouter.ai/api/v1/audio/transcriptions")
 STT_MODEL = os.environ.get("HERMES_STT_MODEL", "openai/whisper-1")
 YTDLP_PROXY = os.environ.get("YTDLP_PROXY", "http://127.0.0.1:7897")
+YTDLP_FORMAT = os.environ.get("YTDLP_FORMAT", "bv*+ba/b")
+YTDLP_MERGE_FORMAT = os.environ.get("YTDLP_MERGE_FORMAT", "mp4")
 
 MEDIA_EXTS = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".wma", ".amr", ".avi", ".wmv", ".mov", ".mp4", ".m4v", ".mpeg", ".flv"}
 YOUTUBE_RE = re.compile(r"https?://(?:www\.)?(?:youtube\.com/watch\?[^\s]+|youtu\.be/[^\s]+)", re.I)
@@ -49,6 +52,18 @@ def base_env() -> dict:
     env["LARKSUITE_CLI_NO_UPDATE_NOTIFIER"] = "1"
     env["LARKSUITE_CLI_NO_SKILLS_NOTIFIER"] = "1"
     return env
+
+
+
+def ffmpeg_location() -> str | None:
+    configured = os.environ.get("FFMPEG_LOCATION")
+    if configured:
+        return configured
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return None
 
 
 def hermes_token() -> str:
@@ -440,9 +455,14 @@ def build_ytdlp_cmd(url: str, output_template: str, extra_args: list[str] | None
         sys.executable, "-m", "yt_dlp",
         "--no-playlist",
         "--windows-filenames",
-        "-f", "bestaudio/best",
+        "-f", YTDLP_FORMAT,
         "-o", output_template,
+        "--merge-output-format", YTDLP_MERGE_FORMAT,
+        "--print", "after_move:filepath",
     ]
+    ffmpeg_path = ffmpeg_location()
+    if ffmpeg_path:
+        cmd.extend(["--ffmpeg-location", ffmpeg_path])
     if YTDLP_PROXY:
         cmd.extend(["--proxy", YTDLP_PROXY])
     if extra_args:
@@ -452,9 +472,8 @@ def build_ytdlp_cmd(url: str, output_template: str, extra_args: list[str] | None
 
 
 def download_youtube_audio(url: str, event_id: str) -> tuple[Path, str]:
-    TEMP_DIR.mkdir(exist_ok=True)
-    digest = hashlib.sha1(f"{event_id}:{url}".encode("utf-8")).hexdigest()[:12]
-    output_template = str(TEMP_DIR / f"yt-{digest}.%(ext)s")
+    DOWNLOAD_DIR.mkdir(exist_ok=True)
+    output_template = str(DOWNLOAD_DIR / "%(title).120B [%(id)s].%(ext)s")
     attempts = [
         [],
         ["--extractor-args", "youtube:player_client=android,ios,web"],
@@ -464,18 +483,20 @@ def download_youtube_audio(url: str, event_id: str) -> tuple[Path, str]:
     for extra_args in attempts:
         result = run_ytdlp_download(build_ytdlp_cmd(url, output_template, extra_args))
         if result.returncode == 0:
-            break
+            paths = [Path(line.strip()) for line in (result.stdout or "").splitlines() if line.strip()]
+            existing = [path for path in paths if path.exists()]
+            if existing:
+                media_path = existing[-1]
+                return media_path, media_path.name
+            matches = sorted(DOWNLOAD_DIR.glob("*"), key=lambda x: x.stat().st_mtime, reverse=True)
+            if matches:
+                media_path = matches[0]
+                return media_path, media_path.name
+            raise RuntimeError("yt-dlp 下载完成但未找到输出文件")
         last_raw = (result.stderr or result.stdout or "").strip()
         if not youtube_verification_error(last_raw):
             raise RuntimeError(f"yt-dlp 下载失败：{last_raw[:700]}")
-    else:
-        raise RuntimeError("这个 YouTube 链接触发了登录/真人验证。已尝试普通下载和多个免登录客户端参数，仍无法下载；需要换代理出口，或在你明确同意后使用浏览器 cookies / cookies.txt。")
-
-    matches = sorted(TEMP_DIR.glob(f"yt-{digest}.*"), key=lambda x: x.stat().st_mtime, reverse=True)
-    if not matches:
-        raise RuntimeError("yt-dlp 下载完成但未找到输出文件")
-    media_path = matches[0]
-    return media_path, media_path.name
+    raise RuntimeError("这个 YouTube 链接触发了登录/真人验证。已尝试普通下载和多个免登录客户端参数，仍无法下载；需要换代理出口，或在你明确同意后使用浏览器 cookies / cookies.txt。")
 
 
 def handle_youtube_message(content: str, message_id: str, chat_id: str, event_id: str) -> bool:
@@ -483,19 +504,11 @@ def handle_youtube_message(content: str, message_id: str, chat_id: str, event_id
     if not match:
         return False
     url = match.group(0)
-    local_path: Path | None = None
-    send_chat(chat_id, "已收到视频链接，开始用 yt-dlp 临时下载音频并生成飞书妙记。", event_id, "-yt-start")
-    try:
-        local_path, name = download_youtube_audio(url, event_id)
-        log(f"yt-dlp downloaded message={message_id} file={local_path.name}")
-        process_local_media(local_path, name, message_id, chat_id, event_id)
-    finally:
-        if local_path and local_path.exists():
-            try:
-                local_path.unlink()
-                log(f"deleted temp youtube media message={message_id}")
-            except Exception as exc:
-                log(f"failed to delete temp youtube media message={message_id}: {exc}")
+    send_chat(chat_id, "已收到视频链接，开始用 yt-dlp 下载视频并生成飞书妙记。下载文件会保留在本机 bridge-downloads 目录。", event_id, "-yt-start")
+    local_path, name = download_youtube_audio(url, event_id)
+    log(f"yt-dlp downloaded message={message_id} file={local_path.name}")
+    process_local_media(local_path, name, message_id, chat_id, event_id)
+    send_chat(chat_id, f"本机下载文件已保留：{local_path}", event_id, "-yt-saved")
     return True
 
 

@@ -6,7 +6,7 @@
 - 飞书私聊/群聊中的音视频附件转飞书妙记
 - 读取妙记逐字稿并创建飞书文档
 - 飞书妙记链接导出为干净逐字稿 Markdown 文件并上传到飞书云空间
-- YouTube 链接通过 `yt-dlp` 临时下载音频后转飞书妙记
+- YouTube 链接通过 `yt-dlp` 下载完整视频后转飞书妙记，并保留到 `bridge-downloads/`
 
 ## 主要文件
 
@@ -28,7 +28,7 @@
 python -m pip install --user yt-dlp
 ```
 
-桥接代码调用 `python -m yt_dlp`，不依赖 `yt-dlp.exe` 是否在 PATH 中。
+桥接代码调用 `python -m yt_dlp`，不依赖 `yt-dlp.exe` 是否在 PATH 中。`ffmpeg` 由 `imageio-ffmpeg` 提供，桥接会自动传给 yt-dlp 用于合并视频。
 
 ## 飞书授权
 
@@ -55,4 +55,5 @@ http://127.0.0.1:7897
 powershell -ExecutionPolicy Bypass -File .\start_feishu_hermes_bridge.ps1
 powershell -ExecutionPolicy Bypass -File .\stop_feishu_hermes_bridge.ps1
 ```
+
 
