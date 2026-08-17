@@ -392,6 +392,35 @@ def preference_reply(content: str) -> str | None:
     return None
 
 
+def profile_request_reply(content: str) -> str | None:
+    compact = re.sub(r"\s+", "", content)
+    mentions_profile = any(token in compact.lower() for token in ("profile", "soul.md"))
+    asks_role = any(token in compact for token in ("岗位职责", "岗位", "职责", "角色能力"))
+    wants_config = any(token in compact for token in ("配置", "加载", "启用", "切换"))
+
+    if not (mentions_profile or asks_role):
+        return None
+
+    if wants_config or mentions_profile:
+        return (
+            "我收到 profile 配置请求了，但当前飞书桥接不会直接读取或改写 Hermes sandbox 内的 profile 文件。\n\n"
+            "你给的路径 `/sandbox/.hermes/profiles/podcast-video-distiller/SOUL.md` 是 Hermes sandbox 内路径；"
+            "飞书 bot 运行在本机 bridge 这边，不能仅凭这条飞书消息自动加载该文件。"
+            "如果要真正切换 profile，需要先确认 Hermes/OpenShell 文本接口在线，并给 bridge 增加 profile-loader 或路径映射。\n\n"
+            "我现在的岗位职责：接收 YouTube 链接、音视频直链、本地/飞书聊天音视频文件、飞书妙记链接；"
+            "下载或读取媒体后生成飞书妙记，只输出干净逐字稿正文，不做摘要、总结、标题、来源、Speaker 或时间戳；"
+            "最后把逐字稿保存为 Markdown 文件上传到飞书云空间，并创建飞书在线文档。"
+        )
+
+    if asks_role:
+        return (
+            "我现在的岗位职责：接收 YouTube 链接、音视频直链、本地/飞书聊天音视频文件、飞书妙记链接；"
+            "生成干净逐字稿正文，并保存为 Markdown 文件和飞书在线文档。"
+        )
+
+    return None
+
+
 def handle_minute_link_message(content: str, message_id: str, chat_id: str, event_id: str) -> bool:
     match = MINUTE_URL_RE.search(content)
     if not match:
@@ -635,6 +664,11 @@ def main() -> int:
 
             if message_type != "text" or not content:
                 reply(message_id, "我目前可以处理文本消息和音视频文件。这个消息类型暂不支持。", event_id)
+                continue
+
+            prof_reply = profile_request_reply(content)
+            if prof_reply:
+                reply(message_id, prof_reply, event_id)
                 continue
 
             pref_reply = preference_reply(content)
