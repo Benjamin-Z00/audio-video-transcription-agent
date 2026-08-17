@@ -35,6 +35,7 @@ ACTIVE_PROFILE_PATH = Path(os.environ.get(
 
 MEDIA_EXTS = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".wma", ".amr", ".avi", ".wmv", ".mov", ".mp4", ".m4v", ".mpeg", ".flv"}
 YOUTUBE_RE = re.compile(r"https?://(?:www\.)?(?:youtube\.com/watch\?[^\s]+|youtu\.be/[^\s]+)", re.I)
+XIAOYUZHOU_RE = re.compile(r"https?://(?:www\.)?xiaoyuzhoufm\.com/episode/[a-zA-Z0-9]+", re.I)
 MINUTE_URL_RE = re.compile(r"https?://[^\s]+/minutes/(obcn[a-zA-Z0-9]+)", re.I)
 URL_RE = re.compile(r"https?://[^\s<>\"]+", re.I)
 FILE_RE = re.compile(r'<file\s+key="([^"]+)"\s+name="([^"]+)"\s*/?>')
@@ -530,12 +531,17 @@ def youtube_verification_error(raw: str) -> bool:
     return "Sign in to confirm" in raw or "not a bot" in raw or "cookies-from-browser" in raw
 
 
-def build_ytdlp_cmd(url: str, output_template: str, extra_args: list[str] | None = None) -> list[str]:
+def build_ytdlp_cmd(
+    url: str,
+    output_template: str,
+    extra_args: list[str] | None = None,
+    format_selector: str | None = None,
+) -> list[str]:
     cmd = [
         sys.executable, "-m", "yt_dlp",
         "--no-playlist",
         "--windows-filenames",
-        "-f", YTDLP_FORMAT,
+        "-f", format_selector or YTDLP_FORMAT,
         "-o", output_template,
         "--merge-output-format", YTDLP_MERGE_FORMAT,
         "--print", "after_move:filepath",
@@ -577,6 +583,30 @@ def download_youtube_audio(url: str, event_id: str) -> tuple[Path, str]:
         if not youtube_verification_error(last_raw):
             raise RuntimeError(f"yt-dlp 下载失败：{last_raw[:700]}")
     raise RuntimeError("这个 YouTube 链接触发了登录/真人验证。已尝试普通下载和多个免登录客户端参数，仍无法下载；需要换代理出口，或在你明确同意后使用浏览器 cookies / cookies.txt。")
+
+
+def latest_ytdlp_output_path(stdout: str) -> Path | None:
+    paths = [Path(line.strip()) for line in (stdout or "").splitlines() if line.strip()]
+    existing = [path for path in paths if path.exists()]
+    if existing:
+        return existing[-1]
+    matches = sorted(DOWNLOAD_DIR.glob("*"), key=lambda x: x.stat().st_mtime, reverse=True)
+    return matches[0] if matches else None
+
+
+def download_xiaoyuzhou_audio(url: str, event_id: str) -> tuple[Path, str]:
+    DOWNLOAD_DIR.mkdir(exist_ok=True)
+    output_template = str(DOWNLOAD_DIR / "小宇宙-%(title).120B [%(id)s].%(ext)s")
+    result = run_ytdlp_download(
+        build_ytdlp_cmd(url, output_template, format_selector="bestaudio/best")
+    )
+    if result.returncode != 0:
+        raw = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(f"小宇宙音频下载失败：{raw[:700]}")
+    media_path = latest_ytdlp_output_path(result.stdout or "")
+    if not media_path:
+        raise RuntimeError("小宇宙音频下载完成但未找到输出文件")
+    return media_path, media_path.name
 
 
 def extract_first_url(content: str) -> str | None:
@@ -621,6 +651,19 @@ def handle_media_url_message(content: str, message_id: str, chat_id: str, event_
     log(f"direct media downloaded message={message_id} file={local_path.name}")
     process_local_media(local_path, name, message_id, chat_id, event_id)
     send_chat(chat_id, f"本机下载文件已保留：{local_path}", event_id, "-url-saved")
+    return True
+
+
+def handle_xiaoyuzhou_message(content: str, message_id: str, chat_id: str, event_id: str) -> bool:
+    match = XIAOYUZHOU_RE.search(content)
+    if not match:
+        return False
+    url = match.group(0)
+    send_chat(chat_id, "已收到小宇宙 FM 链接，开始下载音频并生成飞书妙记。下载文件会保留在本机 bridge-downloads 目录。", event_id, "-xyz-start")
+    local_path, name = download_xiaoyuzhou_audio(url, event_id)
+    log(f"xiaoyuzhou downloaded message={message_id} file={local_path.name}")
+    process_local_media(local_path, name, message_id, chat_id, event_id)
+    send_chat(chat_id, f"本机下载文件已保留：{local_path}", event_id, "-xyz-saved")
     return True
 
 
@@ -701,13 +744,16 @@ def main() -> int:
             if handle_youtube_message(content, message_id, chat_id, event_id):
                 continue
 
+            if handle_xiaoyuzhou_message(content, message_id, chat_id, event_id):
+                continue
+
             if handle_media_url_message(content, message_id, chat_id, event_id):
                 continue
 
             try:
                 answer = ask_hermes(content, sender_id, chat_type)
             except urllib.error.URLError as exc:
-                raise RuntimeError("文本问答接口暂时不可用，但音视频转写桥接仍可用。请直接发送音视频文件、飞书妙记链接或 YouTube 链接。") from exc
+                raise RuntimeError("文本问答接口暂时不可用，但音视频转写桥接仍可用。请直接发送音视频文件、飞书妙记链接、YouTube 链接或小宇宙 FM 链接。") from exc
             reply(message_id, answer, event_id)
             log(f"replied event={event_id} message={message_id}")
         except Exception as exc:
