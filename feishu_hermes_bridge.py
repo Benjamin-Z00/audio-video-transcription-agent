@@ -16,6 +16,9 @@ ROOT = Path(__file__).resolve().parent
 LOG_PATH = ROOT / "feishu-hermes-bridge.log"
 TEMP_DIR = ROOT / "bridge-temp"
 DOWNLOAD_DIR = ROOT / "bridge-downloads"
+SCHEDULED_CONFIG_PATH = ROOT / "scheduled_config.json"
+SCHEDULED_QUEUE_PATH = ROOT / "scheduled_queue.json"
+SCHEDULED_RUN_LOG_PATH = ROOT / "scheduled-runs.jsonl"
 
 LARK_CLI = r"C:\Users\bozhu\.trae-cn\plugins\trae-remote-official\lark\1.0.3\bin\lark-cli.exe"
 HERMES_HOME = str(ROOT / ".hermes-bind")
@@ -177,6 +180,55 @@ def run_lark(args: list[str], timeout: int = 60, input_text: str | None = None) 
 def idempotency_key(prefix: str, event_id: str, suffix: str = "") -> str:
     digest = hashlib.sha1(f"{event_id}:{suffix}".encode("utf-8")).hexdigest()[:16]
     return f"{prefix}-{digest}"
+
+
+def load_scheduled_queue() -> list[dict]:
+    if not SCHEDULED_QUEUE_PATH.exists():
+        return []
+    try:
+        data = json.loads(SCHEDULED_QUEUE_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def save_scheduled_queue(items: list[dict]) -> None:
+    SCHEDULED_QUEUE_PATH.write_text(
+        json.dumps(items, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def scheduled_queue_requested(content: str) -> bool:
+    compact = re.sub(r"\s+", "", content)
+    return any(token in compact for token in ("定时处理", "加入队列", "加入定时", "明天处理", "9点处理", "九点处理"))
+
+
+def enqueue_scheduled_link(content: str, chat_id: str, message_id: str, sender_id: str) -> str | None:
+    if not scheduled_queue_requested(content):
+        return None
+    url = extract_first_url(content)
+    if not url:
+        return "我没有识别到可加入定时队列的链接。请发送：定时处理 https://..."
+    supported = any(pattern.search(url) for pattern in (MINUTE_URL_RE, YOUTUBE_RE, XIAOYUZHOU_RE, BILIBILI_RE)) or is_direct_media_url(url)
+    if not supported:
+        return "这个链接类型当前不能加入定时队列。支持：飞书妙记、YouTube、小宇宙 FM、B 站、音视频直链。"
+
+    items = load_scheduled_queue()
+    entry_id = hashlib.sha1(f"{message_id}:{url}".encode("utf-8")).hexdigest()[:16]
+    if any(item.get("id") == entry_id for item in items):
+        return f"这个链接已经在定时队列中。队列 ID：{entry_id}"
+    items.append({
+        "id": entry_id,
+        "url": url,
+        "status": "pending",
+        "source_chat_id": chat_id,
+        "source_message_id": message_id,
+        "sender_id": sender_id,
+        "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+    })
+    save_scheduled_queue(items)
+    return f"已加入每天 9:00 定时转写队列。队列 ID：{entry_id}\n输出群：我的龙虾团队"
 
 
 def reply(message_id: str, text: str, event_id: str, suffix: str = "") -> None:
@@ -768,6 +820,11 @@ def main() -> int:
 
             if message_type not in ("text", "post") or not content:
                 reply(message_id, "我目前可以处理文本消息、富文本消息和音视频文件。这个消息类型暂不支持。", event_id)
+                continue
+
+            queued_reply = enqueue_scheduled_link(content, chat_id, message_id, sender_id)
+            if queued_reply:
+                reply(message_id, queued_reply, event_id)
                 continue
 
             prof_reply = profile_request_reply(content)

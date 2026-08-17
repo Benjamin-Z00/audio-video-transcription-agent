@@ -1,0 +1,18 @@
+{
+  "agent_name": "audio-video-transcription-agent",
+  "profile_path": "C:\\Users\\bozhu\\OneDrive\\文档\\音视频转录Agent\\04-Profile.md",
+  "output_chat_id": "oc_2ee44b34cc70f080f717af67256312d3",
+  "output_chat_name": "我的龙虾团队",
+  "input_mode": "manual_feishu_queue",
+  "queue_file": "scheduled_queue.json",
+  "run_log_file": "scheduled-runs.jsonl",
+  "schedule": "daily 09:00 Asia/Shanghai",
+  "enqueue_phrases": [
+    "定时处理",
+    "加入队列",
+    "加入定时",
+    "明天处理",
+    "9点处理",
+    "九点处理"
+  ]
+}

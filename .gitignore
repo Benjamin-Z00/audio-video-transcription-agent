@@ -33,3 +33,6 @@ config-init-agent.*.log
 skills/
 *.xml
 吴梦知文案调研与Skill沉淀.md
+# Scheduled run local state
+scheduled_queue.json
+scheduled-runs.jsonl
