@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>音视频转录 Agent | Jetty</title>
+  <meta name="description" content="音视频转录 Agent 的公开展示页：功能、规范、能力边界和模拟体验。" />
+  <link rel="stylesheet" href="./assets/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#top" aria-label="音视频转录 Agent 首页">
+      <span class="brand-mark">J</span>
+      <span>音视频转录 Agent</span>
+    </a>
+    <nav class="nav" aria-label="页面导航">
+      <a href="#demo">模拟体验</a>
+      <a href="#capabilities">能力边界</a>
+      <a href="#workflow">流程</a>
+      <a href="#proof">运行证明</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow">公开展示页 · 不连接真实 API</p>
+        <h1 id="hero-title">Jetty 把音视频链接变成飞书文档</h1>
+        <p class="hero-text">支持 YouTube、B站、小宇宙 FM、飞书妙记和音视频文件。这个页面只展示功能、规范和模拟体验，不读取你的飞书、Hermes、密钥或本地文件。</p>
+        <div class="hero-actions">
+          <a class="button primary" href="#demo">体验模拟流程</a>
+          <a class="button" href="#manual">查看使用规范</a>
+        </div>
+      </div>
+      <figure class="hero-visual" aria-label="音视频转录 Agent 模拟工作台">
+        <img src="./assets/agent-workflow.png" alt="模拟的音视频转录 Agent 工作台，包含媒体、聊天、文档和安全状态面板" />
+        <figcaption>模拟界面，不连接真实服务</figcaption>
+      </figure>
+    </section>
+
+    <section class="notice" aria-label="安全说明">
+      <strong>安全边界：</strong>本页面是静态展示页，所有对话、链接、文档地址和运行状态都是脱敏样例。访客不能调用 Jetty，不能访问你的飞书群、Hermes、Codex、本地文件或任何 API。
+    </section>
+
+    <section class="section grid-3" id="capabilities" aria-labelledby="cap-title">
+      <div class="section-heading">
+        <p class="eyebrow">Capability Map</p>
+        <h2 id="cap-title">它能做什么</h2>
+      </div>
+      <article class="feature"><h3>多平台链接</h3><p>YouTube、B站、小宇宙 FM、飞书妙记、音视频直链都可进入转写流程。</p></article>
+      <article class="feature"><h3>自动转写交付</h3><p>下载媒体，上传飞书云空间，创建飞书妙记，读取逐字稿，生成 Markdown 和飞书文档。</p></article>
+      <article class="feature"><h3>定时队列</h3><p>带上“定时处理”或“加入队列”，链接会进入每天上午 9 点自动处理队列。</p></article>
+    </section>
+
+    <section class="section demo-layout" id="demo" aria-labelledby="demo-title">
+      <div class="demo-copy">
+        <p class="eyebrow">Simulated Feishu Chat</p>
+        <h2 id="demo-title">像真实体验，但不会真的调用你的 Agent</h2>
+        <p>选择一个样例输入，右侧会模拟 Jetty 的回复过程。这里不会下载视频、创建妙记，也不会生成真实文档。</p>
+        <div class="demo-controls" role="group" aria-label="模拟输入类型">
+          <button class="demo-choice active" data-case="xiaoyuzhou">小宇宙链接</button>
+          <button class="demo-choice" data-case="bilibili">B站链接</button>
+          <button class="demo-choice" data-case="youtube">YouTube 链接</button>
+          <button class="demo-choice" data-case="schedule">定时队列</button>
+        </div>
+      </div>
+      <div class="phone" aria-live="polite">
+        <div class="phone-header"><span class="dot"></span><strong>我的龙虾团队</strong><span>Jetty</span></div>
+        <div class="chat" id="chatLog"></div>
+      </div>
+    </section>
+
+    <section class="section workflow" id="workflow" aria-labelledby="workflow-title">
+      <div class="section-heading">
+        <p class="eyebrow">Workflow</p>
+        <h2 id="workflow-title">真实工作流</h2>
+      </div>
+      <ol class="steps">
+        <li><span>1</span><div><h3>飞书触发</h3><p>用户在私聊或群聊里发送链接、文件，或发送“定时处理 + 链接”。</p></div></li>
+        <li><span>2</span><div><h3>本地 Bridge</h3><p>识别平台类型，调用 yt-dlp 下载媒体，保留到本地下载目录。</p></div></li>
+        <li><span>3</span><div><h3>飞书妙记</h3><p>把媒体上传飞书云空间并创建妙记，等待逐字稿生成。</p></div></li>
+        <li><span>4</span><div><h3>文档交付</h3><p>输出 Markdown 文件和飞书在线文档，并把链接发回目标会话。</p></div></li>
+      </ol>
+    </section>
+
+    <section class="section boundary" aria-labelledby="boundary-title">
+      <div>
+        <p class="eyebrow">Rules</p>
+        <h2 id="boundary-title">能力边界</h2>
+      </div>
+      <div class="boundary-grid">
+        <article><h3>可以处理</h3><ul><li>公开音视频链接</li><li>飞书妙记链接</li><li>飞书聊天中的音视频文件</li><li>每天 9 点定时队列</li></ul></article>
+        <article><h3>不会处理</h3><ul><li>未授权私密内容</li><li>付费或受限课程</li><li>绕过平台访问控制</li><li>默认读取浏览器 cookies</li></ul></article>
+        <article><h3>需要人工介入</h3><ul><li>YouTube 真人验证</li><li>飞书 user 授权过期</li><li>链接下架或无法访问</li><li>音频质量严重影响识别</li></ul></article>
+      </div>
+    </section>
+
+    <section class="section manual" id="manual" aria-labelledby="manual-title">
+      <div class="section-heading">
+        <p class="eyebrow">How To Use</p>
+        <h2 id="manual-title">使用规范</h2>
+      </div>
+      <div class="command-grid">
+        <div><span>立即处理</span><code>@jetty https://www.bilibili.com/video/BVxxxx</code></div>
+        <div><span>定时处理</span><code>@jetty 定时处理 https://www.xiaoyuzhoufm.com/episode/xxxx</code></div>
+        <div><span>加入队列</span><code>@jetty 加入队列 https://www.youtube.com/watch?v=xxxx</code></div>
+      </div>
+    </section>
+
+    <section class="section proof" id="proof" aria-labelledby="proof-title">
+      <div class="section-heading">
+        <p class="eyebrow">Proof</p>
+        <h2 id="proof-title">最近真实运行记录</h2>
+      </div>
+      <div class="timeline">
+        <div><time>2026-08-17 23:35</time><p>群聊收到小宇宙 FM 链接。</p></div>
+        <div><time>2026-08-17 23:36</time><p>音频下载完成，上传飞书云空间并创建飞书妙记。</p></div>
+        <div><time>2026-08-17 23:39</time><p>生成 Markdown 和飞书文档，向目标群返回链接。</p></div>
+      </div>
+      <pre class="sample-output">转录完成，已生成干净逐字稿。
+Markdown 文件：https://my.feishu.cn/file/脱敏样例
+飞书文档：https://my.feishu.cn/docx/脱敏样例</pre>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>公开展示对象：音视频转录 Agent · 页面不包含密钥、chat_id、token、cookies 或真实 API 调用。</p>
+  </footer>
+  <script src="./assets/app.js"></script>
+</body>
+</html>
