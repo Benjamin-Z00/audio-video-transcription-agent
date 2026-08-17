@@ -36,6 +36,7 @@ ACTIVE_PROFILE_PATH = Path(os.environ.get(
 MEDIA_EXTS = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".wma", ".amr", ".avi", ".wmv", ".mov", ".mp4", ".m4v", ".mpeg", ".flv"}
 YOUTUBE_RE = re.compile(r"https?://(?:www\.)?(?:youtube\.com/watch\?[^\s]+|youtu\.be/[^\s]+)", re.I)
 XIAOYUZHOU_RE = re.compile(r"https?://(?:www\.)?xiaoyuzhoufm\.com/episode/[a-zA-Z0-9]+", re.I)
+BILIBILI_RE = re.compile(r"https?://(?:(?:www\.)?bilibili\.com/video/[a-zA-Z0-9]+/?[^\s<>\"]*|b23\.tv/[a-zA-Z0-9]+)", re.I)
 MINUTE_URL_RE = re.compile(r"https?://[^\s]+/minutes/(obcn[a-zA-Z0-9]+)", re.I)
 URL_RE = re.compile(r"https?://[^\s<>\"]+", re.I)
 FILE_RE = re.compile(r'<file\s+key="([^"]+)"\s+name="([^"]+)"\s*/?>')
@@ -609,6 +610,34 @@ def download_xiaoyuzhou_audio(url: str, event_id: str) -> tuple[Path, str]:
     return media_path, media_path.name
 
 
+def download_bilibili_video(url: str, event_id: str) -> tuple[Path, str]:
+    DOWNLOAD_DIR.mkdir(exist_ok=True)
+    output_template = str(DOWNLOAD_DIR / "B站-%(title).120B [%(id)s].%(ext)s")
+    attempts = [
+        (None, ["--no-check-certificate", "--force-ipv4"]),
+        ("bv*[height<=720]+ba/b[height<=720]/b", ["--no-check-certificate", "--force-ipv4"]),
+        ("bestaudio/best", ["--no-check-certificate", "--force-ipv4"]),
+    ]
+    last_raw = ""
+    for format_selector, extra_args in attempts:
+        result = run_ytdlp_download(
+            build_ytdlp_cmd(
+                url,
+                output_template,
+                extra_args=extra_args,
+                format_selector=format_selector,
+            )
+        )
+        if result.returncode == 0:
+            media_path = latest_ytdlp_output_path(result.stdout or "")
+            if media_path:
+                return media_path, media_path.name
+            raise RuntimeError("B站视频下载完成但未找到输出文件")
+        last_raw = (result.stderr or result.stdout or "").strip()
+        time.sleep(2)
+    raise RuntimeError(f"B站视频下载失败：{last_raw[:700]}")
+
+
 def extract_first_url(content: str) -> str | None:
     match = URL_RE.search(content)
     if not match:
@@ -642,7 +671,7 @@ def download_direct_media_url(url: str, event_id: str) -> tuple[Path, str]:
 
 def handle_media_url_message(content: str, message_id: str, chat_id: str, event_id: str) -> bool:
     url = extract_first_url(content)
-    if not url or MINUTE_URL_RE.search(url) or YOUTUBE_RE.search(url):
+    if not url or MINUTE_URL_RE.search(url) or YOUTUBE_RE.search(url) or XIAOYUZHOU_RE.search(url) or BILIBILI_RE.search(url):
         return False
     if not is_direct_media_url(url):
         return False
@@ -651,6 +680,19 @@ def handle_media_url_message(content: str, message_id: str, chat_id: str, event_
     log(f"direct media downloaded message={message_id} file={local_path.name}")
     process_local_media(local_path, name, message_id, chat_id, event_id)
     send_chat(chat_id, f"本机下载文件已保留：{local_path}", event_id, "-url-saved")
+    return True
+
+
+def handle_bilibili_message(content: str, message_id: str, chat_id: str, event_id: str) -> bool:
+    match = BILIBILI_RE.search(content)
+    if not match:
+        return False
+    url = match.group(0)
+    send_chat(chat_id, "已收到 B 站视频链接，开始下载视频并生成飞书妙记。下载文件会保留在本机 bridge-downloads 目录。", event_id, "-bili-start")
+    local_path, name = download_bilibili_video(url, event_id)
+    log(f"bilibili downloaded message={message_id} file={local_path.name}")
+    process_local_media(local_path, name, message_id, chat_id, event_id)
+    send_chat(chat_id, f"本机下载文件已保留：{local_path}", event_id, "-bili-saved")
     return True
 
 
@@ -747,13 +789,16 @@ def main() -> int:
             if handle_xiaoyuzhou_message(content, message_id, chat_id, event_id):
                 continue
 
+            if handle_bilibili_message(content, message_id, chat_id, event_id):
+                continue
+
             if handle_media_url_message(content, message_id, chat_id, event_id):
                 continue
 
             try:
                 answer = ask_hermes(content, sender_id, chat_type)
             except urllib.error.URLError as exc:
-                raise RuntimeError("文本问答接口暂时不可用，但音视频转写桥接仍可用。请直接发送音视频文件、飞书妙记链接、YouTube 链接或小宇宙 FM 链接。") from exc
+                raise RuntimeError("文本问答接口暂时不可用，但音视频转写桥接仍可用。请直接发送音视频文件、飞书妙记链接、YouTube 链接、小宇宙 FM 链接或 B 站视频链接。") from exc
             reply(message_id, answer, event_id)
             log(f"replied event={event_id} message={message_id}")
         except Exception as exc:
