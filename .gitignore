@@ -36,3 +36,6 @@ skills/
 # Scheduled run local state
 scheduled_queue.json
 scheduled-runs.jsonl
+
+# Site build output
+dist/
