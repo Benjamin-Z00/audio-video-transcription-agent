@@ -28,6 +28,10 @@ STT_MODEL = os.environ.get("HERMES_STT_MODEL", "openai/whisper-1")
 YTDLP_PROXY = os.environ.get("YTDLP_PROXY", "http://127.0.0.1:7897")
 YTDLP_FORMAT = os.environ.get("YTDLP_FORMAT", "bv*+ba/b")
 YTDLP_MERGE_FORMAT = os.environ.get("YTDLP_MERGE_FORMAT", "mp4")
+ACTIVE_PROFILE_PATH = Path(os.environ.get(
+    "HERMES_PROFILE_PATH",
+    r"C:\Users\bozhu\OneDrive\文档\音视频转录Agent\04-Profile.md",
+))
 
 MEDIA_EXTS = {".wav", ".mp3", ".m4a", ".aac", ".ogg", ".wma", ".amr", ".avi", ".wmv", ".mov", ".mp4", ".m4v", ".mpeg", ".flv"}
 YOUTUBE_RE = re.compile(r"https?://(?:www\.)?(?:youtube\.com/watch\?[^\s]+|youtu\.be/[^\s]+)", re.I)
@@ -80,15 +84,53 @@ def hermes_token() -> str:
     return token
 
 
+def load_active_profile() -> str:
+    try:
+        if ACTIVE_PROFILE_PATH.exists():
+            return ACTIVE_PROFILE_PATH.read_text(encoding="utf-8").strip()
+    except Exception as exc:
+        log(f"failed to load active profile path={ACTIVE_PROFILE_PATH}: {exc}")
+    return ""
+
+
+def active_profile_role_reply() -> str:
+    status = (
+        f"已配置 profile：{ACTIVE_PROFILE_PATH}"
+        if ACTIVE_PROFILE_PATH.exists()
+        else f"profile 路径未读取到：{ACTIVE_PROFILE_PATH}"
+    )
+    return (
+        f"{status}\n\n"
+        "我现在的岗位职责是：音视频转录整理助理（小B）。\n\n"
+        "我负责接收播客、视频、会议录音、飞书妙记、本地音视频文件或已有文本稿，"
+        "先识别来源和访问属性，判断是否公开、私密、付费或需要额外授权；"
+        "再获取或生成转录稿，检查音频质量，清洗时间戳、口水话和 ASR 错词，"
+        "对无法确认的人名、术语、缩写或长英文词标注 `[待确认]`。\n\n"
+        "默认交付物是一篇适合分享、转发和沉淀的中文分享式提纯稿，"
+        "需要保留关键案例、关键数字和重要原话，不做摘要式要点；"
+        "最后创建飞书文档，检查权限，并交付可访问链接。"
+    )
+
+
+def agent_system_prompt() -> str:
+    profile = load_active_profile()
+    if profile:
+        return (
+            "以下是当前必须遵守的 Hermes Agent Profile。请严格按 Profile 执行，中文回复，务实简洁。\n\n"
+            f"{profile}"
+        )
+    return "You are an audio/video transcription agent. Reply in Chinese, concise and practical."
+
+
 def ask_hermes(content: str, sender_id: str, chat_type: str) -> str:
     token = hermes_token()
     payload = {
         "model": MODEL,
         "messages": [
-            {"role": "system", "content": "You are an audio/video transcription agent. Reply in Chinese, concise and practical."},
+            {"role": "system", "content": agent_system_prompt()},
             {"role": "user", "content": f"Feishu {chat_type} message, sender={sender_id}: {content}"},
         ],
-        "max_tokens": 500,
+        "max_tokens": 900,
     }
     req = urllib.request.Request(
         HERMES_API,
@@ -370,19 +412,7 @@ def preference_reply(content: str) -> str | None:
     asks_capability = any(token in compact for token in ("能力边界", "你能做什么", "能做什么", "不能做什么", "能力是什么", "你的能力"))
 
     if asks_capability:
-        return (
-            "我是音视频转录 Agent。\n\n"
-            "我能做：\n"
-            "1. 接收 YouTube 视频链接，下载视频并保留到本机 bridge-downloads。\n"
-            "2. 接收普通音频/视频直链，下载并保留到本机 bridge-downloads。\n"
-            "3. 接收飞书聊天里的音频/视频附件。\n"
-            "4. 接收飞书妙记链接。\n"
-            "5. 最终只生成干净逐字稿正文，保存为 Markdown 文件并上传到飞书云空间，同时创建飞书在线文档。\n\n"
-            "我不会做：\n"
-            "1. 不输出摘要、总结、标题、来源、Speaker 或时间戳。\n"
-            "2. 不默认读取浏览器 cookies；YouTube 需要登录验证时必须先经过你确认。\n"
-            "3. 不把 API key、app secret、cookies、临时文件提交到 GitHub。"
-        )
+        return active_profile_role_reply()
 
     if wants_clean_transcript or mentions_no_summary or mentions_cloud_doc:
         return (
@@ -394,29 +424,15 @@ def preference_reply(content: str) -> str | None:
 
 def profile_request_reply(content: str) -> str | None:
     compact = re.sub(r"\s+", "", content)
-    mentions_profile = any(token in compact.lower() for token in ("profile", "soul.md"))
+    mentions_profile = any(token in compact.lower() for token in ("profile", "soul.md", "04-profile.md"))
     asks_role = any(token in compact for token in ("岗位职责", "岗位", "职责", "角色能力"))
     wants_config = any(token in compact for token in ("配置", "加载", "启用", "切换"))
 
     if not (mentions_profile or asks_role):
         return None
 
-    if wants_config or mentions_profile:
-        return (
-            "我收到 profile 配置请求了，但当前飞书桥接不会直接读取或改写 Hermes sandbox 内的 profile 文件。\n\n"
-            "你给的路径 `/sandbox/.hermes/profiles/podcast-video-distiller/SOUL.md` 是 Hermes sandbox 内路径；"
-            "飞书 bot 运行在本机 bridge 这边，不能仅凭这条飞书消息自动加载该文件。"
-            "如果要真正切换 profile，需要先确认 Hermes/OpenShell 文本接口在线，并给 bridge 增加 profile-loader 或路径映射。\n\n"
-            "我现在的岗位职责：接收 YouTube 链接、音视频直链、本地/飞书聊天音视频文件、飞书妙记链接；"
-            "下载或读取媒体后生成飞书妙记，只输出干净逐字稿正文，不做摘要、总结、标题、来源、Speaker 或时间戳；"
-            "最后把逐字稿保存为 Markdown 文件上传到飞书云空间，并创建飞书在线文档。"
-        )
-
-    if asks_role:
-        return (
-            "我现在的岗位职责：接收 YouTube 链接、音视频直链、本地/飞书聊天音视频文件、飞书妙记链接；"
-            "生成干净逐字稿正文，并保存为 Markdown 文件和飞书在线文档。"
-        )
+    if wants_config or mentions_profile or asks_role:
+        return active_profile_role_reply()
 
     return None
 
@@ -662,8 +678,11 @@ def main() -> int:
                 handle_file_message(message_id, chat_id, event_id)
                 continue
 
-            if message_type != "text" or not content:
-                reply(message_id, "我目前可以处理文本消息和音视频文件。这个消息类型暂不支持。", event_id)
+            if message_type == "post":
+                content = get_message_content(message_id).strip() or content
+
+            if message_type not in ("text", "post") or not content:
+                reply(message_id, "我目前可以处理文本消息、富文本消息和音视频文件。这个消息类型暂不支持。", event_id)
                 continue
 
             prof_reply = profile_request_reply(content)
